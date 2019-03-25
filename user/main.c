@@ -32,9 +32,18 @@
 #define NIGHT_MODE_BRIGHTNESS		2
 #define NIGHT_MODE_FAIR_FACTOR		50
 #define SCAN_SPEED_BRIGHTNESS		55
-#define SEETING_TIME_SCAN_SPEED		2
+#define SEETING_TIME_SCAN_SPEED		10
 
 sbit is_rotate = P1 ^ 0;
+
+struct set_time_env {
+	char key;
+	char max;
+	char min;
+	enum set_type type;
+	const char *name;
+	struct fb_info idata *fb_info;
+};
 
 struct menu {
 	const char *name;
@@ -65,7 +74,7 @@ static struct menu xdata set_hour_menu;
 static struct menu xdata set_minute_menu;
 static struct menu xdata *current;
 
-static struct user_data pdata user_data;
+static struct user_data idata user_data;
 
 static void user_data_init(void)
 {
@@ -104,12 +113,9 @@ static void local_irq_enable(void)
 
 static unsigned int fb_load_temperature(unsigned int offset)
 {
-	char pdata str[] = {
-		' ', '-', ' ', '-', ' ', '.',
-		' ', '-', ' ', 'c', '\0',
-	};
+	char idata str[] = " - - . - c";
 	char integer, decimals;
-	char pdata *p = str + 1;
+	char idata *p = str + 1;
 
 	if (lm75_read_temperature(&integer, &decimals) &&
 	    ds3231_read_temperature(&integer, &decimals))
@@ -136,7 +142,7 @@ err:
 	return fb_copy_string(offset, p);
 }
 
-static bool should_show_temperature(struct user_data pdata *user)
+static bool should_show_temperature(struct user_data idata *user)
 {
 	return !user->night_mode;
 }
@@ -150,12 +156,12 @@ static bool should_chime(union timekeeping *timekeeping)
 
 static void fb_load_times(void *priv)
 {
-	static pdata char sec_old = 0xff, min_old = 0xff, hour_old = 0xff;
-	pdata struct user_data *user = priv;
-	pdata union timekeeping *timekeeping = &user->timekeeping;
-	pdata struct fb_info *fb_info = &user->fb_info;
+	static char sec_old = 0xff, min_old = 0xff, hour_old = 0xff;
+	struct user_data idata *user = priv;
+	union timekeeping idata *timekeeping = &user->timekeeping;
+	struct fb_info idata *fb_info = &user->fb_info;
 	bool force = user->force_update;
-	char pdata str[5];
+	char idata str[5];
 	char half_low;
 	static bool is_temp = false;
 	unsigned int offset = 0;
@@ -177,6 +183,7 @@ static void fb_load_times(void *priv)
 		buzzer_chime();
 
 	if (force) {
+		fb_info->offset = 0;
 		user->force_update = false;
 		is_temp = false;
 	}
@@ -267,13 +274,13 @@ static unsigned int fb_load_time(unsigned int offset, enum set_type type,
 {
 	char value;
 	unsigned int offset_old = offset;
-	char pdata str[] = { ' ', '-', ' ', '-', ' ', ' ', '\0', };
+	char idata str[] = "  - - ";
 
 	if (ds3231_read_time(type, &value))
 		return 0;
 
-	str[1] = value / 16 + '0';
-	str[3] = value % 16 + '0';
+	str[2] = value / 16 + '0';
+	str[4] = value % 16 + '0';
 	offset += fb_copy_string(offset, str);
 	offset += fb_copy_string(offset, s);
 
@@ -299,75 +306,74 @@ static void key_delay(struct fb_info *fb_info)
 		fb_show(fb_info);
 }
 
-#define HOUR_MAX		24
-#define MINUTE_MAX		60
-
-static void set_hour(void *priv)
+static bool set_time_common(struct set_time_env idata *env)
 {
 	char value;
-	pdata struct user_data *user = priv;
-	pdata struct fb_info *fb_info = &user->fb_info;
-	char key = user->key;
+	enum set_type type = env->type;
+	struct fb_info idata *fb_info = env->fb_info;
 
-	if (ds3231_read_time(SET_HOUR, &value))
-		return;
+	if (ds3231_read_time(type, &value))
+		return false;
 	value = value / 16 * 10 + value % 16;
 
-	switch (key) {
+	switch (env->key) {
 	case KEY_RIGHT:
-		if (++value == HOUR_MAX)
-			value = 0;
+		if (++value > env->max)
+			value = env->min;
 		key_delay(fb_info);
 		break;
 	case KEY_LEFT:
-		if (--value == -1)
-			value = HOUR_MAX - 1;
+		if (--value < env->min)
+			value = env->max;
 		key_delay(fb_info);
 		break;
 	default:
-		return;
+		return false;
 	}
 
-	ds3231_set_time(SET_HOUR, value / 10 * 16 + value % 10);
-	fb_load_hour(fb_info->offset);
+	ds3231_set_time(type, value / 10 * 16 + value % 10);
+	fb_load_time(fb_info->offset, type, env->name);
+
+	return true;
+}
+
+static void set_hour(void *priv)
+{
+	struct user_data idata *user = priv;
+	struct set_time_env idata env;
+
+	env.key		= user->key;
+	env.max		= 23;
+	env.min		= 0;
+	env.type	= SET_HOUR;
+	env.name	= "时";
+	env.fb_info	= &user->fb_info;
+
+	set_time_common(&env);
 }
 
 static void set_minute(void *priv)
 {
-	char value;
-	pdata struct user_data *user = priv;
-	pdata struct fb_info *fb_info = &user->fb_info;
-	char key = user->key;
+	struct user_data idata *user = priv;
+	struct set_time_env idata env;
 
-	if (ds3231_read_time(SET_MINUTES, &value))
+	env.key		= user->key;
+	env.max		= 59;
+	env.min		= 0;
+	env.type	= SET_MINUTES;
+	env.name	= "分";
+	env.fb_info	= &user->fb_info;
+
+	if (!set_time_common(&env))
 		return;
-	value = value / 16 * 10 + value % 16;
-
-	switch (key) {
-	case KEY_RIGHT:
-		if (++value == MINUTE_MAX)
-			value = 0;
-		key_delay(fb_info);
-		break;
-	case KEY_LEFT:
-		if (--value == -1)
-			value = MINUTE_MAX - 1;
-		key_delay(fb_info);
-		break;
-	default:
-		return;
-	}
-
-	ds3231_set_time(SET_MINUTES, value / 10 * 16 + value % 10);
 	ds3231_set_time(SET_SECOND, 0);
-	fb_load_minute(fb_info->offset);
 }
 
 #define ROOT_MENU_NAME		"root"
 
 static bool is_root_menu(struct menu xdata *entry)
 {
-	return !strcmp(entry->name, ROOT_MENU_NAME);
+	return entry->name && !strcmp(entry->name, ROOT_MENU_NAME);
 }
 
 static void menu_init(void)
@@ -393,9 +399,9 @@ static void menu_init(void)
 	current = &root_menu;
 }
 
-static bool interface_switching(struct user_data pdata *user, char key)
+static bool interface_switching(struct user_data idata *user, char key)
 {
-	struct fb_info pdata *fb_info = &user->fb_info;
+	struct fb_info idata *fb_info = &user->fb_info;
 	struct menu xdata *current_old = current;
 	bool success = false;
 #if CONFIG_FB_SIZE > 128
@@ -410,7 +416,6 @@ static bool interface_switching(struct user_data pdata *user, char key)
 		buzzer_enter();
 		current = current->child;
 		if (is_root_menu(current)) {
-			fb_info->offset = 0;
 			user->force_update = true;
 			break;
 		}
@@ -420,7 +425,7 @@ static bool interface_switching(struct user_data pdata *user, char key)
 		else
 			fb_copy_string(fb_info->offset + MATRIXS_COLUMNS,
 				       current->name);
-		fb_info->offset = fb_scan(fb_info, 64, 2);
+		fb_info->offset = fb_scan(fb_info, 64, 1);
 		break;
 	case KEY_LEFT:
 		if (!current->sibling_prev)
@@ -488,10 +493,12 @@ static bool interface_switching(struct user_data pdata *user, char key)
 
 void main(void)
 {
-	struct fb_info pdata *fb_info = &user_data.fb_info;
+	struct fb_info idata *fb_info = &user_data.fb_info;
 
 	user_data_init();
 	buzzer_power_on();
+	fb_off();
+	fb_matrixs_test();
 	uart_init();
 	touch_key_init();
 	fb_set(0, 0, 64);
@@ -515,28 +522,30 @@ void main(void)
 		}
 		if (current && current->operate)
 			current->operate(current->private);
+
 		/**
-		 * We really should disable local irq all the time.
-		 * But we can not do this, because if we do that,
-		 * the buzzer_chime() will work abnormal.
-		 */
-		if (user_data.night_mode)
-			local_irq_disable();
+		* We should disable local irq when call fb_show().
+		* But we can not do this, because if we do that,
+		* the buzzer_chime() will work abnormal. And now
+		* we can do that. Because timer0 is not able to
+		* mask interrupts via EA = 0.
+		*/
+		local_irq_disable();
 		fb_show(fb_info);
-		if (user_data.night_mode)
-			local_irq_enable();
+		local_irq_enable();
 	}
 }
 
-/* Timer0 interrupt routine */
-void timer0_isr() interrupt 1 using 2
+/* Timer1 interrupt routine(10ms) */
+void timer1_isr() interrupt 3 using 2
 {
-	static char adc_cnt = 0;
+	static unsigned char timer_count = 0;
 
-	if (++adc_cnt == 20) {
+	/* every 320ms */
+	if (timer_count % 32 == 0)
 		adc_start(ADC_CHANNEL);
-		adc_cnt = 0;
-	}
+
+	timer_count++;
 }
 
 #ifdef CONFIG_PRES_PULL_UP

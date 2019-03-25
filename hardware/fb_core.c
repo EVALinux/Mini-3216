@@ -12,6 +12,7 @@
  */
 
 #include "fb_core.h"
+#include <string.h>
 
 /**
  * +--------------+---------------+---------------+---------------+
@@ -27,15 +28,15 @@
  * +--------------+---------------+---------------+---------------+
  */
 
-#if FB_SIZE > 128
-#define MEMORY_TYPE		xdata
+#if FB_SIZE > 256
+#define FB_MEMORY_TYPE		xdata
 #else
-#define MEMORY_TYPE		pdata
+#define FB_MEMORY_TYPE		pdata
 #endif
 
 #define FB_HALF_SIZE_MASK	(sizeof(frame_buffer) / 2 - 1)
 
-static char MEMORY_TYPE frame_buffer[FB_SIZE];
+static char FB_MEMORY_TYPE frame_buffer[FB_SIZE];
 
 struct fb_column_info {
 	char column;
@@ -124,7 +125,37 @@ void fb_off(void)
 	P0 = P2 = P3 = P4 = 0x00;
 }
 
-static void fb_show_column(struct fb_column_info pdata *fb_column_info)
+#ifdef CONFIG_MATRIXS_TEST
+#define MATRIXS_FB_SIZE		(MATRIXS_COLUMNS << 1)
+
+void fb_matrixs_test(void)
+{
+	unsigned char i, j, k;
+	char FB_MEMORY_TYPE *fb = frame_buffer;
+	struct fb_info fb_info;
+
+	memset(&fb_info, 0, sizeof(fb_info));
+	fb_set(0, 0, 32);
+	fb_info.brightness = 50;
+
+	for (i = 0; i < MATRIXS_FB_SIZE; ++i, ++fb) {
+		for (j = 0; j < MATRIX_COLUMNS; ++j) {
+			*fb |= 1 << j;
+			for (k = 0; k < ((MATRIXS_FB_SIZE - i) >> 2) + 5; ++k)
+				fb_show(&fb_info);
+		}
+	}
+
+	for (i = 0; i < 50; ++i)
+		fb_show(&fb_info);
+}
+#else
+void fb_matrixs_test(void)
+{
+}
+#endif
+
+static void fb_show_column(struct fb_column_info idata *fb_column_info)
 {
 	char index = fb_column_info->column >> MATRIX_COLUMN_SHIFT;
 	char offset = fb_column_info->column & MATRIX_COLUMNS_MASK;
@@ -153,7 +184,7 @@ static void fb_show_column(struct fb_column_info pdata *fb_column_info)
 	}
 }
 
-static void fb_show_column_rotate(struct fb_column_info pdata *fb_column_info)
+static void fb_show_column_rotate(struct fb_column_info idata *fb_column_info)
 {
 	char index = fb_column_info->column >> MATRIX_COLUMN_SHIFT;
 	char offset = fb_column_info->column & MATRIX_COLUMNS_MASK;
@@ -202,9 +233,9 @@ static void fb_show_column_rotate(struct fb_column_info pdata *fb_column_info)
 void fb_show(struct fb_info *fb_info)
 {
 	unsigned char i;
-	struct fb_column_info pdata fb_column_info;
-	char MEMORY_TYPE *fb = frame_buffer;
-	void (code *show)(struct fb_column_info pdata *fb_column_info);
+	struct fb_column_info idata fb_column_info;
+	char FB_MEMORY_TYPE *fb = frame_buffer;
+	void (code *show)(struct fb_column_info idata *fb_column_info);
 
 	fb_info->offset &= FB_HALF_SIZE_MASK;
 	fb_column_info.fair = fb_info->fair;
@@ -223,7 +254,7 @@ void fb_show(struct fb_info *fb_info)
 }
 
 /**
- * @n should range [32, FB_SIZE / 2]
+ * @n should range [MATRIXS_COLUMNS, FB_SIZE / 2]
  */
 unsigned int fb_scan(struct fb_info *fb_info, unsigned int n,
 		     unsigned char speed)
@@ -231,7 +262,7 @@ unsigned int fb_scan(struct fb_info *fb_info, unsigned int n,
 	unsigned int i, offset = fb_info->offset;
 	unsigned char j;
 
-	if (n > FB_SIZE / 2 || n < 32)
+	if (n > FB_SIZE / 2 || n < MATRIXS_COLUMNS)
 		return offset;
 
 	for (i = 0; i < n - MATRIXS_COLUMNS_MASK; ++i) {
@@ -245,7 +276,7 @@ unsigned int fb_scan(struct fb_info *fb_info, unsigned int n,
 }
 
 /**
- * @n should range [32, FB_SIZE / 2]
+ * @n should range [MATRIXS_COLUMNS, FB_SIZE / 2]
  */
 unsigned int fb_scan_reverse(struct fb_info *fb_info, unsigned int n,
 			     unsigned char speed)
@@ -253,7 +284,7 @@ unsigned int fb_scan_reverse(struct fb_info *fb_info, unsigned int n,
 	unsigned int i, offset = fb_info->offset;
 	unsigned char j;
 
-	if (n > FB_SIZE / 2 || n < 32)
+	if (n > FB_SIZE / 2 || n < MATRIXS_COLUMNS)
 		return offset;
 
 	for (i = 0; i < n - MATRIXS_COLUMNS_MASK; ++i) {
@@ -271,7 +302,7 @@ unsigned int fb_scan_reverse(struct fb_info *fb_info, unsigned int n,
  */
 unsigned int fb_copy(unsigned int offset, const char *src, unsigned int width)
 {
-	char MEMORY_TYPE *fb = frame_buffer;
+	char FB_MEMORY_TYPE *fb = frame_buffer;
 	unsigned int ret = width;
 
 	offset &= FB_HALF_SIZE_MASK;
