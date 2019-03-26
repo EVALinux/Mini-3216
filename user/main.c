@@ -541,16 +541,16 @@ void timer1_isr() interrupt 3 using 2
 {
 	static unsigned char timer_count = 0;
 
-	/* every 320ms */
-	if (timer_count % 32 == 0)
+	/* every 1280ms */
+	if (timer_count % 128 == 0)
 		adc_start(ADC_CHANNEL);
 
 	timer_count++;
 }
 
 #ifdef CONFIG_PRES_PULL_UP
-#define NIGHT_MODE_ADC_VALUE		0x70
-#define BRIGHT_MODE_ADC_VALUE		0x40
+#define NIGHT_MODE_ADC_VALUE		0xa0
+#define BRIGHT_MODE_ADC_VALUE		0x60
 #else
 #define NIGHT_MODE_ADC_VALUE		0xf0
 #define BRIGHT_MODE_ADC_VALUE		0xc8
@@ -563,11 +563,15 @@ void adc_isr(void) interrupt 5 using 1
 
 	ADC_CONTR &= ~ADC_FLAG;
 	result = ADC_RES;
-	if (result > NIGHT_MODE_ADC_VALUE && !user_data.night_mode) {
+	if (result > NIGHT_MODE_ADC_VALUE) {
 		user_data.night_mode = true;
 		user_data.fb_info.fair = NIGHT_MODE_FAIR_FACTOR;
 		user_data.fb_info.brightness = NIGHT_MODE_BRIGHTNESS;
-	} else if (result < BRIGHT_MODE_ADC_VALUE && user_data.night_mode) {
+	} else if (result > BRIGHT_MODE_ADC_VALUE) {
+		user_data.night_mode = true;
+		user_data.fb_info.brightness = NIGHT_MODE_BRIGHTNESS;
+		user_data.fb_info.fair = false;
+	} else if (user_data.night_mode) {
 		user_data.night_mode = false;
 		user_data.fb_info.brightness = user_data.settings.brightness;
 		user_data.fb_info.fair = false;
