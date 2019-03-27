@@ -82,6 +82,7 @@ static void user_data_init(void)
 	user_data.fb_info.brightness = DEFAULT_BRIGHTNESS;
 	user_data.settings.brightness = DEFAULT_BRIGHTNESS;
 	user_data.fb_info.fair = false;
+	user_data.fb_info.rotate = !is_rotate;
 	user_data.force_update = true;
 #ifdef CONFIG_DS3231_INT
 	user_data.rtc_update = true;
