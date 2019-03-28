@@ -15,17 +15,54 @@
 #include <string.h>
 
 /**
- * +--------------+---------------+---------------+---------------+
- * |              |               |               |               |
- * |      0       |       2       |       4       |       6       |
- * |              |               |               |               |
- * |              |               |               |               |
- * +--------------+---------------+---------------+---------------+
- * |              |               |               |               |
- * |      1       |       3       |       5       |       7       |
- * |              |               |               |               |
- * |              |               |               |               |
- * +--------------+---------------+---------------+---------------+
+ * +---------------+---------------+---------------+---------------+
+ * |               |               |               |               |
+ * |               |               |               |               |
+ * |       0       |       2       |       4       |       6       |
+ * |               |               |               |               |
+ * |               |               |               |               |
+ * +---------------+---------------+---------------+---------------+
+ * |               |               |               |               |
+ * |               |               |               |               |
+ * |       1       |       3       |       5       |       7       |
+ * |               |               |               |               |
+ * |               |               |               |               |
+ * +---------------+---------------+---------------+---------------+
+ *
+ *        P0 <--------+------------+
+ *                    |   +-----+  |   +-----+
+ *                    +---+  0  |  +---+  2  |
+ *                        +--+--+      +--+--+
+ *                           |            |
+ *          +----------------+            +-------+
+ *          |                                     |
+ *          |  P2 <---+------------+              |
+ *          |         |   +-----+  |   +-----+    |
+ *          |         +---+  1  |  +---+  3  |    |
+ *          |             +--+--+      +--+--+    |
+ *          |                |            |       |
+ *          +----------------+            +-------+
+ *          |                                     |
+ *          v                                     v
+ *          P3                                    P4
+ *
+ *
+ *         P3 <-------+------------+
+ *                    |   +-----+  |   +-----+
+ *                    +---+  4  |  +---+  6  |
+ *                        +--+--+      +--+--+
+ *                           |            |
+ *          +----------------+            +-------+
+ *          |                                     |
+ *          |  P4 <---+------------+              |
+ *          |         |   +-----+  |   +-----+    |
+ *          |         +---+  5  |  +---+  7  |    |
+ *          |             +--+--+      +--+--+    |
+ *          |                |            |       |
+ *          +----------------+            +-------+
+ *          |                                     |
+ *          v                                     v
+ *          P0                                    P2
  */
 
 #if FB_SIZE > 256
@@ -51,32 +88,35 @@ static void led_on_delay(unsigned char i)
 	while (i--);
 }
 
-#define DRIVER_ONE_LED(mask, port, brightness)				\
-	do {								\
-		port##M1 = ~(mask);					\
-		led_on_delay(brightness);				\
-		port##M1 = 0xff;					\
-	} while(0)
+#define MATRIX_MAX_COLUMN	(MATRIX_COLUMNS - 1)
+#define MATRIXS_MAX_COLUMN	(MATRIXS_COLUMNS - 1)
 
-#define DECLARE_MATRIX_DISP(n, port0, port1)				\
+#define LED_ON(mask, anode, brightness)					\
+	do {								\
+		anode##M1 = ~(mask);					\
+		led_on_delay(brightness);				\
+		anode##M1 = 0xff;					\
+	} while (0)
+
+#define DECLARE_MATRIX_DISP(n, anode, cathode)				\
 	static void matrix##n##_disp(char column, char dat,		\
 				     unsigned char brightness,		\
 				     unsigned char fair)		\
 	{								\
 		char i;							\
 									\
-		port1 = ~(1 << column);					\
-		for (i = 0; i < 8; i++) {				\
-			char mask = 1 << i;				\
+		cathode = ~BIT(column);					\
+		for (i = 0; i < MATRIX_COLUMNS; i++) {			\
+			char mask = BIT(i);				\
 									\
 			if (dat & mask) {				\
-				DRIVER_ONE_LED(mask, port0, brightness);\
+				LED_ON(mask, anode, brightness);	\
 				if (fair)				\
 					led_on_delay(fair - brightness);\
 			} else if (fair)				\
 				led_on_delay(fair);			\
 		}							\
-		port1 = 0xff;						\
+		cathode = 0xff;						\
 	}								\
 									\
 	static void matrix##n##_disp_rotate(char column, char dat, 	\
@@ -85,23 +125,21 @@ static void led_on_delay(unsigned char i)
 	{								\
 		char i;							\
 									\
-		port1 = ~(1 << (7 - column));				\
-		for (i = 0; i < 8; i++) {				\
-			char mask = 1 << i;				\
-									\
-			if (dat & mask) {				\
-				DRIVER_ONE_LED(1 << (7 - i), port0,	\
-					       brightness);		\
+		cathode = ~BIT(MATRIX_MAX_COLUMN - column);		\
+		for (i = 0; i < MATRIX_COLUMNS; i++) {			\
+			if (dat & BIT(i)) {				\
+				LED_ON(BIT(MATRIX_MAX_COLUMN - i),	\
+				       anode, brightness);		\
 				if (fair)				\
 					led_on_delay(fair - brightness);\
 			} else if (fair)				\
 				led_on_delay(fair);			\
 		}							\
-		port1 = 0xff;						\
+		cathode = 0xff;						\
 	}								\
 									\
 /* Just for macro definition ends with a semicolon for Keil C51 */	\
-static xdata char __dummy_##n##_unused__
+static bit __dummy_##n##_unused__
 
 DECLARE_MATRIX_DISP(0, P0, P3);
 DECLARE_MATRIX_DISP(1, P2, P3);
@@ -218,25 +256,20 @@ static void fb_show_column_rotate(struct fb_column_info idata *fb_column_info)
 /**
  * fb_show - Frame buffer show to dot-matrix screen.
  *
- * @offset: The offset relative to the frame_buffer
- * @brightness: The brightness of each LED
- * @rotate: Whether to rotate display
- * @fair: If @fair is true, each LED will be on or off for the same time.
- *	  Otherwise, only the LED that needs to be on will delay.
+ * @fb_info: The frame buffer info.
  */
 void fb_show(struct fb_info *fb_info)
 {
 	unsigned char i;
 	struct fb_column_info idata fb_column_info;
-	char FB_MEMORY_TYPE *fb = frame_buffer;
+	char FB_MEMORY_TYPE *fb = frame_buffer +
+				  ((fb_info->offset & FB_HALF_SIZE_MASK) << 1);
 	void (code *show)(struct fb_column_info idata *fb_column_info);
 
-	fb_info->offset &= FB_HALF_SIZE_MASK;
 	fb_column_info.fair = fb_info->fair;
 	fb_column_info.brightness = fb_info->brightness;
-	fb += fb_info->offset << 1;
-
 	show = fb_info->rotate ? fb_show_column_rotate : fb_show_column;
+
 	for (i = 0; i < MATRIXS_COLUMNS; ++i) {
 		fb_column_info.column = i;
 		fb_column_info.byte_h = *fb++;
@@ -259,7 +292,7 @@ unsigned int fb_scan(struct fb_info *fb_info, unsigned int n,
 	if (n > FB_COLUMNS || n < MATRIXS_COLUMNS)
 		return offset;
 
-	for (i = 0; i < n - MATRIXS_COLUMNS_MASK; ++i) {
+	for (i = 0; i < n - MATRIXS_MAX_COLUMN; ++i) {
 		for (j = 0; j < speed; ++j)
 			fb_show(fb_info);
 		fb_info->offset++;
@@ -281,7 +314,7 @@ unsigned int fb_scan_reverse(struct fb_info *fb_info, unsigned int n,
 	if (n > FB_COLUMNS || n < MATRIXS_COLUMNS)
 		return offset;
 
-	for (i = 0; i < n - MATRIXS_COLUMNS_MASK; ++i) {
+	for (i = 0; i < n - MATRIXS_MAX_COLUMN; ++i) {
 		for (j = 0; j < speed; ++j)
 			fb_show(fb_info);
 		fb_info->offset--;
@@ -296,20 +329,17 @@ unsigned int fb_scan_reverse(struct fb_info *fb_info, unsigned int n,
  */
 unsigned int fb_copy(unsigned int offset, const char *src, unsigned int width)
 {
-	char FB_MEMORY_TYPE *fb = frame_buffer;
-	unsigned int ret = width;
+	char FB_MEMORY_TYPE *fb = frame_buffer +
+				  ((offset & FB_HALF_SIZE_MASK) << 1);
+	unsigned int n = width << 1;
 
-	offset &= FB_HALF_SIZE_MASK;
-	fb += offset << 1;
-
-	width <<= 1;
-	while (width--) {
+	while (n--) {
 		*fb++ = *src++;
 		if (fb == frame_buffer + sizeof(frame_buffer))
 			fb = frame_buffer;
 	}
 
-	return ret;
+	return width;
 }
 
 unsigned int fb_set(unsigned int offset, char c, unsigned int width)
